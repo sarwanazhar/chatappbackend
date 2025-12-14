@@ -16,11 +16,23 @@ func InitRoutes(router *gin.Engine) {
 	auth := router.Group("/")
 	auth.Use(libs.JWTMiddleware())
 	{
-		auth.GET("/me", controlers.GetProfiles)
+		User(auth)
+		Chat(auth)
+
 	}
 }
 
 func Auth(router *gin.Engine) {
 	router.POST("/auth/register", controlers.CreateUser)
 	router.POST("/auth/login", controlers.LoginUser)
+}
+
+func User(router *gin.RouterGroup) {
+	router.GET("/me", controlers.GetProfiles)
+}
+
+func Chat(router *gin.RouterGroup) {
+	router.POST("/chat/create", controlers.CreateChat)
+	router.GET("/chat/getall", controlers.GetChat)
+	router.POST("/chat/message", controlers.CreateMessage)
 }

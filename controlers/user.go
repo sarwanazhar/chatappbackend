@@ -116,6 +116,8 @@ func LoginUser(c *gin.Context) {
 
 }
 
+// Protected routes
+
 func GetProfiles(c *gin.Context) {
 	userID := c.GetString("userId")
 	fmt.Print(userID)
