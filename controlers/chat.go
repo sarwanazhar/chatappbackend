@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +17,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"google.golang.org/genai"
 )
 
 // this creates a chat with userid
@@ -82,9 +86,12 @@ func GetChat(c *gin.Context) {
 	defer cancel()
 
 	filter := bson.M{"user_id": user.ID}
+	opts := options.Find().SetSort(bson.M{
+		"created_at": -1, // newest created chat first
+	})
 
 	collection := database.GetCollection("chatApp", "chat")
-	cursor, err := collection.Find(ctx, filter)
+	cursor, err := collection.Find(ctx, filter, opts)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "database operation timed out"})
@@ -101,29 +108,39 @@ func GetChat(c *gin.Context) {
 		return
 	}
 
+	for i := range chats {
+		sort.Slice(chats[i].Messages, func(a, b int) bool {
+			return chats[i].Messages[a].CreatedAt.Before(
+				chats[i].Messages[b].CreatedAt,
+			)
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"chats": chats})
 }
 
+// this is a really complex function it takes {"chat_id":"", "prompt":""}
+// first checks if the chat belongs to user then saves the user prompt then streams ai response then streams that using Server Sent Event(SSE) then saves the ai response
+// the history given to ai is only previous 6 messages to save tokens
 func CreateMessage(c *gin.Context) {
-	// validating user owns this chat first of all
-
+	// --- Parse request ---
 	type Body struct {
 		ChatId string `json:"chat_id"`
 		Prompt string `json:"prompt"`
 	}
+
 	var body Body
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if body.ChatId == "" || body.Prompt == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ChatId and Prompt are required fields and cannot be empty"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ChatId and Prompt are required"})
 		return
 	}
 
+	// --- Load user + chat document ---
 	userID := c.GetString("userId")
-	fmt.Print(userID)
-
 	user, err := libs.FindUserByID(userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -132,62 +149,115 @@ func CreateMessage(c *gin.Context) {
 
 	objectID, err := primitive.ObjectIDFromHex(body.ChatId)
 	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ChatId"})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	filter := bson.M{
-		"_id":     objectID,
-		"user_id": user.ID,
-	}
-
+	filter := bson.M{"_id": objectID, "user_id": user.ID}
 	var chat model.Chat
-
-	err = database.GetCollection("chatApp", "chat").FindOne(ctx, filter).Decode(&chat)
-
-	if err != nil {
+	if err := database.GetCollection("chatApp", "chat").FindOne(ctx, filter).Decode(&chat); err != nil {
 		if err == mongo.ErrNoDocuments {
-			// Document not found, OR it was found but the user_id did not match.
-			// Treat this as a "Not Found" or "Access Denied" error for security.
-			c.JSON(404, gin.H{"error": "not found or the chat does not belong to you"})
-			return
+			c.JSON(http.StatusNotFound, gin.H{"error": "Chat not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database query error"})
 		}
-		c.JSON(500, gin.H{"error": "database query error"})
 		return
 	}
 
-	// --- NEXT STEP: Create the User Message and Update the Database ---
-
-	// 3. Create the new user message structure
+	// --- Save the user message to DB ---
 	userMessage := model.Message{
-		Role:      "user", // This message always comes from the user
+		Role:      "user",
 		Content:   body.Prompt,
 		CreatedAt: time.Now(),
 	}
+	if chat.Messages == nil {
+		chat.Messages = []model.Message{}
+	}
+	chat.Messages = append(chat.Messages, userMessage)
 
-	// 4. Define the Update Operation
-	// We use the $push operator to append the new message to the 'messages' array
-	// and $set to update the 'updated_at' timestamp.
-	update := bson.M{
-		"$push": bson.M{"messages": userMessage},
-		"$set":  bson.M{"updated_at": time.Now()},
+	if _, err := database.GetCollection("chatApp", "chat").UpdateOne(ctx, filter,
+		bson.M{"$push": bson.M{"messages": userMessage}, "$set": bson.M{"updated_at": time.Now()}}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save user message"})
+		return
 	}
 
-	// 5. Execute the Update
-	// We use the same 'filter' to ensure we update the correct, owned chat.
-	updateResult, err := database.GetCollection("chatApp", "chat").UpdateOne(ctx, filter, update)
+	// --- Prepare history for AI ---
+	history := chat.Messages
+	if len(history) > 6 {
+		history = history[len(history)-6:]
+	}
+	genaiContents := libs.ConvertHistoryToGenaiContent(history)
 
+	// --- Setup SSE ---
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Flush()
+
+	// --- Initialize the Gemini client ---
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		fmt.Fprintf(c.Writer, "data: %s\n\n", "{\"error\":\"AI API key not set\"}")
+		c.Writer.Flush()
+		return
+	}
+
+	genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update chat document"})
+		fmt.Fprintf(c.Writer, "data: %s\n\n", "{\"error\":\"Failed to init AI client\"}")
+		c.Writer.Flush()
 		return
 	}
 
-	if updateResult.ModifiedCount == 0 {
-		// Should not happen if the FindOne succeeded, but it's a good defensive check
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Chat document was not modified"})
-		return
+	// --- Stream from Gemini ---
+	stream := genaiClient.Models.GenerateContentStream(ctx,
+		"gemini-2.5-flash",
+		genaiContents,
+		nil,
+	)
+
+	fullResponse := ""
+	for chunk, streamErr := range stream {
+		if streamErr != nil {
+			// send error chunk
+			fmt.Fprintf(c.Writer, "data: %s\n\n", fmt.Sprintf("{\"error\":\"%v\"}", streamErr))
+			c.Writer.Flush()
+			break
+		}
+
+		// Extract text from this chunk
+		// See official example — Use the helper .Text() if available
+		text := ""
+		if len(chunk.Candidates) > 0 {
+			for _, part := range chunk.Candidates[0].Content.Parts {
+				text += part.Text
+			}
+		}
+
+		fullResponse += text
+
+		// Send the incremental text over SSE
+		eventData := fmt.Sprintf("{\"delta\":%q}", text)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", eventData)
+		c.Writer.Flush()
 	}
 
+	// --- Save final AI message in DB ---
+	aiMessage := model.Message{
+		Role:      "model",
+		Content:   fullResponse,
+		CreatedAt: time.Now(),
+	}
+	_, _ = database.GetCollection("chatApp", "chat").UpdateOne(ctx, filter,
+		bson.M{"$push": bson.M{"messages": aiMessage}, "$set": bson.M{"updated_at": time.Now()}})
+
+	// send done event
+	fmt.Fprintf(c.Writer, "event: done\ndata: %s\n\n", "\"end\"")
+	c.Writer.Flush()
 }
