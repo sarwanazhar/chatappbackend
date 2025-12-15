@@ -1,6 +1,6 @@
 # ChatApp Backend
 
-A real-time chat application backend built with Go, MongoDB, and Gin framework. This application provides user authentication, chat management, and AI-powered conversation capabilities using Google's Gemini API.
+A real-time chat application backend built with Go, MongoDB, and Gin framework. This application provides user authentication, chat management, and AI-powered conversation capabilities using Google's Gemini API with free internet search integration via DuckDuckGo.
 
 ## Table of Contents
 
@@ -20,6 +20,7 @@ This is a backend API for a chat application that allows users to:
 - Create multiple chat sessions
 - Send messages in real-time using Server-Sent Events (SSE)
 - Receive AI-generated responses from Google Gemini API
+- Access free internet search capabilities via DuckDuckGo for up-to-date information
 - View chat history with intelligent token management
 
 The application uses JWT tokens for authentication, MongoDB for data persistence, and streams AI responses in real-time to provide a seamless chat experience.
@@ -41,6 +42,10 @@ The application uses JWT tokens for authentication, MongoDB for data persistence
 **AI Integration:**
 - `google.golang.org/genai` - Google Gemini AI API client
 - `cloud.google.com/go` - Google Cloud client libraries
+
+**Internet Search (Free):**
+- `github.com/PuerkitoBio/goquery` - HTML parsing for web scraping
+- Built-in DuckDuckGo search integration (no API key required)
 
 **Security & Utilities:**
 - `golang.org/x/crypto/bcrypt` - Password hashing
@@ -64,7 +69,9 @@ chatApp/
 ├── libs/               # Helper functions and middleware
 │   ├── middleware.go   # JWT authentication middleware
 │   ├── user.go         # User-related database operations
-│   └── ConvertHistoryToGenaiContent.go # AI message formatting
+│   ├── ConvertHistoryToGenaiContent.go # AI message formatting
+│   ├── DecideSearch.go # AI-powered search decision logic
+│   └── DuckDuckGoSearch.go # Free internet search implementation
 ├── model/              # Data models
 │   └── model.go        # User, Message, and Chat models
 ├── routes/             # Route definitions
@@ -265,7 +272,9 @@ POST /chat/message
 **Description:** Send a message to a chat and receive AI responses via Server-Sent Events (SSE). This endpoint:
 - Validates chat ownership
 - Saves user message to database
-- Streams AI response in real-time
+- Automatically determines if internet search is needed using AI routing
+- Performs free DuckDuckGo search when required for up-to-date information
+- Streams AI response in real-time with search context when applicable
 - Saves AI response to database
 - Maintains conversation history (last 6 messages for token efficiency)
 
@@ -333,7 +342,8 @@ GEMINI_API_KEY=your-google-gemini-api-key-here
 
 - Go 1.24.6 or higher
 - MongoDB (local or remote instance)
-- Google Gemini API key
+- Google Gemini API key (for AI responses)
+- Internet connection (for free DuckDuckGo search functionality)
 
 ### Setup Steps
 
@@ -463,6 +473,18 @@ The application integrates with Google's Gemini API to provide intelligent chat 
 - **Streaming:** Real-time response streaming via Server-Sent Events
 - **Error Handling:** Graceful handling of API failures and timeouts
 
+## Internet Search Feature
+
+The application includes a completely free internet search capability:
+
+- **Search Engine:** DuckDuckGo (no API key required)
+- **Smart Routing:** AI-powered decision system determines when search is needed
+- **Search Triggers:** Questions about current events, recent information, news, prices, or real-world data
+- **No Search:** General knowledge, programming, math, logic, and explanations
+- **Results Processing:** Extracts top 5 relevant results with titles and snippets
+- **Context Integration:** Search results are injected into AI system instructions for informed responses
+- **Cost Effective:** No additional costs beyond standard Gemini API usage
+
 ## Future Enhancements
 
 Potential improvements for this application:
@@ -470,6 +492,7 @@ Potential improvements for this application:
 - [ ] WebSocket support for bidirectional communication
 - [ ] Message encryption at rest
 - [ ] Chat search and filtering
+- [x] Free internet search via DuckDuckGo
 - [ ] Multiple AI model support
 - [ ] File upload capabilities
 - [ ] User presence and typing indicators
