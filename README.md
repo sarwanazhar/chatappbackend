@@ -30,6 +30,7 @@ The application uses JWT tokens for authentication, MongoDB for data persistence
 
 **Core Framework & HTTP:**
 - `github.com/gin-gonic/gin` - HTTP web framework for routing and middleware
+- `github.com/ljahier/gin-ratelimit` - Rate limiting
 - `github.com/golang-jwt/jwt/v5` - JWT token creation and validation
 - `github.com/gorilla/websocket` - WebSocket support (available but not currently used)
 
@@ -96,7 +97,7 @@ The application uses JWT (JSON Web Tokens) for authentication with the following
 - JWT middleware validates token and extracts user ID
 - User ID is stored in request context for handler use
 
-## API Routes
+## API Routes (rate limit = 30 request per minute)
 
 ### Public Routes (No Authentication Required)
 
@@ -467,7 +468,6 @@ The application integrates with Google's Gemini API to provide intelligent chat 
 Potential improvements for this application:
 
 - [ ] WebSocket support for bidirectional communication
-- [ ] Rate limiting to prevent abuse
 - [ ] Message encryption at rest
 - [ ] Chat search and filtering
 - [ ] Multiple AI model support
