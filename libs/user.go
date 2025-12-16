@@ -118,8 +118,7 @@ var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 func GenerateJWT(userID string) (string, error) {
 	// Define claims
 	claims := jwt.MapClaims{
-		"userId": userID,                                // store user ID
-		"exp":    time.Now().Add(24 * time.Hour).Unix(), // expires in 1 day
+		"userId": userID, // store user ID
 	}
 
 	// Create token with claims
