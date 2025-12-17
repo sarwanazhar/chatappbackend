@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sarwanazhar/chatappbackend/database"
 	"github.com/sarwanazhar/chatappbackend/libs"
 	"github.com/sarwanazhar/chatappbackend/model"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // this creates a simple user in mongo db
@@ -54,10 +56,29 @@ func CreateUser(c *gin.Context) {
 		Password: hashedPassword,
 	}
 
-	err = libs.CreateUser(contxt, user)
+	newId, err := libs.CreateUser(contxt, user)
 	if err != nil {
 		log.Printf("Failed to create user %s: %v", body.Email, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error. Please try again later."})
+		return
+	}
+	fmt.Print("new user created id:")
+	fmt.Println(newId)
+
+	chat := model.Chat{
+		ID:        primitive.NewObjectID(),
+		UserID:    newId,
+		Title:     "Chat",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err = database.GetCollection("chatApp", "chat").InsertOne(ctx, chat)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create chat"})
 		return
 	}
 

@@ -22,13 +22,13 @@ func getUserCollection() *mongo.Collection {
 	return database.GetCollection(dbName, userCollection)
 }
 
-func CreateUser(ctx context.Context, user *model.User) error {
+func CreateUser(ctx context.Context, user *model.User) (primitive.ObjectID, error) {
 	user.ID = primitive.NewObjectID()
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
 
 	_, err := getUserCollection().InsertOne(ctx, user)
-	return err
+	return user.ID, err
 }
 
 func SearchForExistingEmail(email string) (bool, error) {
