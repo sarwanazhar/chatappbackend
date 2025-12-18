@@ -313,7 +313,7 @@ data: {"error":"AI API key not set"}
 
 #### 8. Delete Chat
 ```
-POST /chat/message
+POST /chat/delete
 ```
 **Headers:** `Authorization: Bearer <token>`
 **Description:** Deletes the chat
