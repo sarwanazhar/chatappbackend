@@ -50,6 +50,51 @@ func CreateChat(c *gin.Context) {
 	})
 }
 
+func DeleteChat(c *gin.Context) {
+	type Body struct {
+		ChatId string `json:"chat_id"`
+	}
+
+	var body Body
+	if err := c.ShouldBindJSON(&body); err != nil || body.ChatId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ChatId is required"})
+		return
+	}
+
+	userID := c.GetString("userId")
+
+	user, err := libs.FindUserByID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	chatObjID, err := primitive.ObjectIDFromHex(body.ChatId)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ChatId"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": chatObjID, "user_id": user.ID}
+
+	// Attempt to delete the chat
+	res, err := database.GetCollection("chatApp", "chat").DeleteOne(ctx, filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete chat"})
+		return
+	}
+
+	if res.DeletedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Chat not found or not owned by user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chat deleted successfully"})
+}
+
 func GetChat(c *gin.Context) {
 	userID := c.GetString("userId")
 

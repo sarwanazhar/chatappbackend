@@ -33,6 +33,7 @@ func User(router *gin.RouterGroup) {
 
 func Chat(router *gin.RouterGroup) {
 	router.POST("/chat/create", controlers.CreateChat)
+	router.POST("/chat/delete", controlers.DeleteChat)
 	router.GET("/chat/getall", controlers.GetChat)
 	router.POST("/chat/message", controlers.CreateMessage)
 }

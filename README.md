@@ -311,6 +311,30 @@ data: "end"
 data: {"error":"AI API key not set"}
 ```
 
+#### 8. Delete Chat
+```
+POST /chat/message
+```
+**Headers:** `Authorization: Bearer <token>`
+**Description:** Deletes the chat
+
+**Request Body:**
+```json
+{
+  "chat_id": "60d5ecb74f4c8a1234567891",
+}
+```
+**Success Response (200):**
+```json
+{
+  "message": "Chat deleted successfully",
+}
+```
+**Error Responses:**
+- `401` - Missing or invalid token
+- `404` - User not found
+- `500` - Server error
+
 ## Environment Variables
 
 Create a `.env` file in the project root with the following variables:
